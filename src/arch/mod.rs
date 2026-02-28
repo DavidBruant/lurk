@@ -149,7 +149,9 @@ fn map_arg(pid: Pid, registers: user_regs_struct, idx: usize, arg: SyscallArgTyp
     match arg {
         SyscallArgType::Int => SyscallArg::Int(value as i64),
         SyscallArgType::Str => SyscallArg::Str(read_string(pid, value)),
-        SyscallArgType::StrArray => SyscallArg::StrVec(read_string_array(pid, value), Some(value as usize)),
+        SyscallArgType::StrArray => {
+            SyscallArg::StrVec(read_string_array(pid, value), Some(value as usize))
+        }
         SyscallArgType::Addr => SyscallArg::Addr(value as usize),
     }
 }

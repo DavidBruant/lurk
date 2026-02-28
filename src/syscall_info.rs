@@ -1,7 +1,10 @@
 use crate::arch::parse_args;
-use libc::{PROT_READ, PROT_WRITE, PROT_EXEC, PROT_NONE, MAP_PRIVATE, MAP_SHARED, MAP_ANONYMOUS, MAP_FIXED, MAP_STACK, MAP_NORESERVE, MAP_LOCKED, MAP_POPULATE, MAP_NONBLOCK};
 use crate::style::StyleConfig;
 use libc::{c_ulonglong, user_regs_struct};
+use libc::{
+    MAP_ANONYMOUS, MAP_FIXED, MAP_LOCKED, MAP_NONBLOCK, MAP_NORESERVE, MAP_POPULATE, MAP_PRIVATE,
+    MAP_SHARED, MAP_STACK, PROT_EXEC, PROT_NONE, PROT_READ, PROT_WRITE,
+};
 use nix::unistd::Pid;
 use serde::ser::{SerializeMap, SerializeSeq};
 use serde::Serialize;
@@ -68,7 +71,7 @@ impl SyscallInfo {
                 write!(output, ", ")?;
             }
             // Special-case a few syscalls for more readable output
-            if (self.syscall == Sysno::execve || self.syscall == Sysno::execveat) {
+            if self.syscall == Sysno::execve || self.syscall == Sysno::execveat {
                 // execve(filename, argv, envp)
                 match (idx, arg) {
                     // argv: show array (possibly truncated by `string_limit` via write)
@@ -95,7 +98,11 @@ impl SyscallInfo {
                 // mmap(addr, len, prot, flags, fd, offset)
                 // produce symbolic prot and flags
                 let parts = format_mmap_args(&self.args.0, string_limit);
-                write!(output, "{}", parts.get(idx).map(|s| s.as_str()).unwrap_or(""))?;
+                write!(
+                    output,
+                    "{}",
+                    parts.get(idx).map(|s| s.as_str()).unwrap_or("")
+                )?;
             } else {
                 arg.write(output, string_limit)?;
             }
@@ -292,7 +299,7 @@ fn format_map_flags(flags: i64) -> String {
     }
 }
 
-fn format_mmap_args(args: &Vec<SyscallArg>, string_limit: Option<usize>) -> Vec<String> {
+fn format_mmap_args(args: &[SyscallArg], string_limit: Option<usize>) -> Vec<String> {
     // Expect 6 args: addr, len, prot, flags, fd, offset
     let mut out = vec![String::new(); args.len()];
     for (i, a) in args.iter().enumerate() {
