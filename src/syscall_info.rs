@@ -116,12 +116,12 @@ impl Serialize for SyscallArgs {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
         for arg in &self.0 {
-                let value = match arg {
-                    SyscallArg::Int(v) => serde_json::to_value(v).unwrap(),
-                    SyscallArg::Str(v) => serde_json::to_value(v).unwrap(),
-                    SyscallArg::Addr(v) => Value::String(format!("{v:#x}")),
-                    SyscallArg::StrVec(vs) => serde_json::to_value(vs).unwrap(),
-                };
+            let value = match arg {
+                SyscallArg::Int(v) => serde_json::to_value(v).unwrap(),
+                SyscallArg::Str(v) => serde_json::to_value(v).unwrap(),
+                SyscallArg::Addr(v) => Value::String(format!("{v:#x}")),
+                SyscallArg::StrVec(vs) => serde_json::to_value(vs).unwrap(),
+            };
             seq.serialize_element(&value)?;
         }
         seq.end()

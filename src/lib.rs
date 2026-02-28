@@ -94,7 +94,7 @@ use syscalls::{Sysno, SysnoMap, SysnoSet};
 use uzers::get_user_by_name;
 
 use crate::args::{Args, Filter};
-use crate::syscall_info::{RetCode, SyscallInfo, SyscallArgs};
+use crate::syscall_info::{RetCode, SyscallArgs, SyscallInfo};
 
 const STRING_LIMIT: usize = 32;
 
@@ -185,7 +185,13 @@ impl<W: Write> Tracer<W> {
                                     if sysno == Sysno::execve || sysno == Sysno::execveat {
                                         // parse args now
                                         let args_now = arch::parse_args(pid, sysno, cur_regs);
-                                        self.log_standard_syscall(pid, Some(cur_regs), Some(args_now), None, None)?;
+                                        self.log_standard_syscall(
+                                            pid,
+                                            Some(cur_regs),
+                                            Some(args_now),
+                                            None,
+                                            None,
+                                        )?;
                                         self.issue_ptrace_syscall_request(pid, None)?;
                                         continue;
                                     }
@@ -248,7 +254,13 @@ impl<W: Write> Tracer<W> {
                                 if sysno == Sysno::execve || sysno == Sysno::execveat {
                                     let args_now = arch::parse_args(pid, sysno, regs);
                                     // log immediately using these args
-                                    self.log_standard_syscall(pid, Some(regs), Some(args_now), None, None)?;
+                                    self.log_standard_syscall(
+                                        pid,
+                                        Some(regs),
+                                        Some(args_now),
+                                        None,
+                                        None,
+                                    )?;
                                 }
                             }
                         }
@@ -280,7 +292,13 @@ impl<W: Write> Tracer<W> {
                     if let Some(syscall_start_time) = start_times.get_mut(&pid) {
                         if event == 2 {
                             let pre = pending_args.remove(&pid).unwrap_or(None);
-                            self.log_standard_syscall(pid, entry_regs, pre, *syscall_start_time, timestamp)?;
+                            self.log_standard_syscall(
+                                pid,
+                                entry_regs,
+                                pre,
+                                *syscall_start_time,
+                                timestamp,
+                            )?;
                             *syscall_start_time = None;
                         } else {
                             *syscall_start_time = timestamp;
@@ -472,7 +490,8 @@ impl<W: Write> Tracer<W> {
 
             if !self.args.summary_only {
                 // Use pre-parsed args if provided (captured at entry), otherwise parse now.
-                let args = pre_parsed_args.unwrap_or_else(|| arch::parse_args(pid, syscall_number, registers));
+                let args = pre_parsed_args
+                    .unwrap_or_else(|| arch::parse_args(pid, syscall_number, registers));
                 let info = SyscallInfo {
                     typ: "SYSCALL",
                     pid,
