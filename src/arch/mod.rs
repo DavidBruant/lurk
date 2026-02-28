@@ -149,7 +149,7 @@ fn map_arg(pid: Pid, registers: user_regs_struct, idx: usize, arg: SyscallArgTyp
     match arg {
         SyscallArgType::Int => SyscallArg::Int(value as i64),
         SyscallArgType::Str => SyscallArg::Str(read_string(pid, value)),
-        SyscallArgType::StrArray => SyscallArg::StrVec(read_string_array(pid, value)),
+        SyscallArgType::StrArray => SyscallArg::StrVec(read_string_array(pid, value), Some(value as usize)),
         SyscallArgType::Addr => SyscallArg::Addr(value as usize),
     }
 }
@@ -184,6 +184,39 @@ pub fn read_string_array(pid: Pid, address: c_ulonglong) -> Vec<String> {
     }
 
     vec
+}
+
+/// Count pointers in a NULL-terminated `char * const *` array without attempting
+/// to dereference the strings. This is more robust when the tracee's memory
+/// cannot be fully read, but the pointer array itself is accessible.
+pub fn read_string_array_count(pid: Pid, address: c_ulonglong) -> usize {
+    if address == 0 {
+        return 0;
+    }
+
+    let mut count = 0usize;
+    let mut offset = 0isize;
+    for _ in 0..1024 {
+        let ptr_addr = unsafe { (address as *mut c_void).offset(offset) };
+        let res: c_long = match ptrace::read(pid, ptr_addr) {
+            Ok(v) => v,
+            Err(_) => break,
+        };
+        // reconstruct pointer value from bytes
+        let mut bytes: Vec<u8> = vec![];
+        bytes.write_i64::<LittleEndian>(res).ok();
+        let mut ptr_value: c_ulonglong = 0;
+        for (i, b) in bytes.iter().enumerate() {
+            ptr_value |= c_ulonglong::from(*b) << (i * 8);
+        }
+        if ptr_value == 0 {
+            break;
+        }
+        count += 1;
+        offset += std::mem::size_of::<c_ulonglong>() as isize;
+    }
+
+    count
 }
 
 pub fn escape_to_string(buf: &Vec<u8>) -> String {

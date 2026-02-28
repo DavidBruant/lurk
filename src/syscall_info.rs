@@ -1,4 +1,5 @@
 use crate::arch::parse_args;
+use libc::{PROT_READ, PROT_WRITE, PROT_EXEC, PROT_NONE, MAP_PRIVATE, MAP_SHARED, MAP_ANONYMOUS, MAP_FIXED, MAP_STACK, MAP_NORESERVE, MAP_LOCKED, MAP_POPULATE, MAP_NONBLOCK};
 use crate::style::StyleConfig;
 use libc::{c_ulonglong, user_regs_struct};
 use nix::unistd::Pid;
@@ -66,7 +67,38 @@ impl SyscallInfo {
             if idx > 0 {
                 write!(output, ", ")?;
             }
-            arg.write(output, string_limit)?;
+            // Special-case a few syscalls for more readable output
+            if (self.syscall == Sysno::execve || self.syscall == Sysno::execveat) {
+                // execve(filename, argv, envp)
+                match (idx, arg) {
+                    // argv: show array (possibly truncated by `string_limit` via write)
+                    (1, SyscallArg::StrVec(_, _)) => arg.write(output, string_limit)?,
+                    // envp: summarize like strace: print original pointer and count
+                    (2, SyscallArg::StrVec(vs, maybe_addr)) => {
+                        if let Some(addr) = maybe_addr {
+                            let count = if !vs.is_empty() {
+                                vs.len()
+                            } else {
+                                // try a best-effort pointer-only count if the strings couldn't be read
+                                crate::arch::read_string_array_count(self.pid, *addr as c_ulonglong)
+                            };
+                            write!(output, "{:#x} /* {} vars */", *addr, count)?
+                        } else {
+                            // fall back to printing the array
+                            arg.write(output, string_limit)?;
+                        }
+                    }
+                    // default
+                    _ => arg.write(output, string_limit)?,
+                }
+            } else if self.syscall == Sysno::mmap {
+                // mmap(addr, len, prot, flags, fd, offset)
+                // produce symbolic prot and flags
+                let parts = format_mmap_args(&self.args.0, string_limit);
+                write!(output, "{}", parts.get(idx).map(|s| s.as_str()).unwrap_or(""))?;
+            } else {
+                arg.write(output, string_limit)?;
+            }
         }
         write!(output, ") = ")?;
         if self.syscall == Sysno::exit || self.syscall == Sysno::exit_group {
@@ -120,7 +152,7 @@ impl Serialize for SyscallArgs {
                 SyscallArg::Int(v) => serde_json::to_value(v).unwrap(),
                 SyscallArg::Str(v) => serde_json::to_value(v).unwrap(),
                 SyscallArg::Addr(v) => Value::String(format!("{v:#x}")),
-                SyscallArg::StrVec(vs) => serde_json::to_value(vs).unwrap(),
+                SyscallArg::StrVec(vs, _addr) => serde_json::to_value(vs).unwrap(),
             };
             seq.serialize_element(&value)?;
         }
@@ -162,7 +194,8 @@ impl Display for RetCode {
 pub enum SyscallArg {
     Int(i64),
     Str(String),
-    StrVec(Vec<String>),
+    // store optional original pointer address for arrays so we can summarize like strace
+    StrVec(Vec<String>, Option<usize>),
     Addr(usize),
 }
 
@@ -178,7 +211,7 @@ impl SyscallArg {
                 .into();
                 write!(f, "{value}")
             }
-            Self::StrVec(vs) => {
+            Self::StrVec(vs, _addr) => {
                 // format vector as JSON-like array, applying trimming to each element
                 let mut parts = Vec::with_capacity(vs.len());
                 for s in vs {
@@ -200,4 +233,89 @@ fn trim_str(string: &str, limit: usize) -> Cow<'_, str> {
         None => Borrowed(string),
         Some(s) => Owned(format!("{s}...")),
     }
+}
+
+fn format_prot(flags: i64) -> String {
+    let mut parts = Vec::new();
+    if flags & (PROT_READ as i64) != 0 {
+        parts.push("PROT_READ");
+    }
+    if flags & (PROT_WRITE as i64) != 0 {
+        parts.push("PROT_WRITE");
+    }
+    if flags & (PROT_EXEC as i64) != 0 {
+        parts.push("PROT_EXEC");
+    }
+    if flags == (PROT_NONE as i64) {
+        parts.push("PROT_NONE");
+    }
+    if parts.is_empty() {
+        format!("{flags}")
+    } else {
+        parts.join("|")
+    }
+}
+
+fn format_map_flags(flags: i64) -> String {
+    let mut parts = Vec::new();
+    if flags & (MAP_SHARED as i64) != 0 {
+        parts.push("MAP_SHARED");
+    }
+    if flags & (MAP_PRIVATE as i64) != 0 {
+        parts.push("MAP_PRIVATE");
+    }
+    if flags & (MAP_ANONYMOUS as i64) != 0 {
+        parts.push("MAP_ANONYMOUS");
+    }
+    if flags & (MAP_FIXED as i64) != 0 {
+        parts.push("MAP_FIXED");
+    }
+    if flags & (MAP_STACK as i64) != 0 {
+        parts.push("MAP_STACK");
+    }
+    if flags & (MAP_NORESERVE as i64) != 0 {
+        parts.push("MAP_NORESERVE");
+    }
+    if flags & (MAP_LOCKED as i64) != 0 {
+        parts.push("MAP_LOCKED");
+    }
+    if flags & (MAP_POPULATE as i64) != 0 {
+        parts.push("MAP_POPULATE");
+    }
+    if flags & (MAP_NONBLOCK as i64) != 0 {
+        parts.push("MAP_NONBLOCK");
+    }
+    if parts.is_empty() {
+        format!("{flags}")
+    } else {
+        parts.join("|")
+    }
+}
+
+fn format_mmap_args(args: &Vec<SyscallArg>, string_limit: Option<usize>) -> Vec<String> {
+    // Expect 6 args: addr, len, prot, flags, fd, offset
+    let mut out = vec![String::new(); args.len()];
+    for (i, a) in args.iter().enumerate() {
+        match (i, a) {
+            (0, SyscallArg::Addr(addr)) => {
+                if *addr == 0 {
+                    out[i] = "NULL".to_string();
+                } else {
+                    out[i] = format!("{:#X}", addr);
+                }
+            }
+            (1, SyscallArg::Int(len)) => out[i] = format!("{}", len),
+            (2, SyscallArg::Int(prot)) => out[i] = format_prot(*prot),
+            (3, SyscallArg::Int(flags)) => out[i] = format_map_flags(*flags),
+            (4, SyscallArg::Int(fd)) => out[i] = format!("{}", fd),
+            (5, SyscallArg::Int(off)) => out[i] = format!("{}", off),
+            // fall back to default write for other or unexpected types
+            (_, other) => {
+                let mut buf = Vec::new();
+                other.write(&mut buf, string_limit).ok();
+                out[i] = String::from_utf8_lossy(&buf).to_string();
+            }
+        }
+    }
+    out
 }
