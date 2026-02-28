@@ -170,7 +170,7 @@ pub fn read_string_array(pid: Pid, address: c_ulonglong) -> Vec<String> {
             Err(_) => break,
         };
         let mut bytes: Vec<u8> = vec![];
-        
+
         bytes.write_i64::<LittleEndian>(res).ok();
         let mut ptr_value: c_ulonglong = 0;
         for (i, b) in bytes.iter().enumerate() {
