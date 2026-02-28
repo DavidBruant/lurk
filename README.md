@@ -323,7 +323,9 @@ See the [tracer](examples/tracer.rs) example.
 
 ## Acknowledgements
 
+- [sharkdp/fd](https://github.com/sharkdp/fd) as an inspiration on how to
   structure a Rust CLI and its README.
+- All maintainers of the dependencies used to create lurk and all of those who
   answered my questions regarding `ptrace`.
 
 **Tracing execve arguments**
