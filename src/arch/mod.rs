@@ -63,6 +63,8 @@ pub enum SyscallArgType {
     Int,
     // String can be used to represent *buf
     Str,
+    // Array of strings, e.g. argv or envp
+    StrArray,
     // Address can be used to represent *statbuf
     Addr,
 }
@@ -78,7 +80,11 @@ pub fn read_string(pid: Pid, address: c_ulonglong) -> String {
 
         let res: c_long = match ptrace::read(pid, address) {
             Ok(c_long) => c_long,
-            Err(_) => break 'done,
+            Err(_) => {
+                // If we can't read the memory at the address, return the pointer
+                // as a hex string so callers can still see a useful value.
+                return format!("{:#x}", address as usize);
+            }
         };
 
         let mut bytes: Vec<u8> = vec![];
@@ -143,8 +149,41 @@ fn map_arg(pid: Pid, registers: user_regs_struct, idx: usize, arg: SyscallArgTyp
     match arg {
         SyscallArgType::Int => SyscallArg::Int(value as i64),
         SyscallArgType::Str => SyscallArg::Str(read_string(pid, value)),
+        SyscallArgType::StrArray => SyscallArg::StrVec(read_string_array(pid, value)),
         SyscallArgType::Addr => SyscallArg::Addr(value as usize),
     }
+}
+
+pub fn read_string_array(pid: Pid, address: c_ulonglong) -> Vec<String> {
+    let mut vec = Vec::new();
+    if address == 0 {
+        return vec;
+    }
+
+    // pointer size on x86_64 is 8 bytes; read pointers until NULL
+    let mut offset = 0isize;
+    // safety limit to avoid infinite loops on corrupt pointers
+    for _ in 0..1024 {
+        let ptr_addr = unsafe { (address as *mut c_void).offset(offset) };
+        let res: c_long = match ptrace::read(pid, ptr_addr) {
+            Ok(v) => v,
+            Err(_) => break,
+        };
+        let mut bytes: Vec<u8> = vec![];
+        use byteorder::{LittleEndian, WriteBytesExt};
+        bytes.write_i64::<LittleEndian>(res).ok();
+        let mut ptr_value: c_ulonglong = 0;
+        for (i, b) in bytes.iter().enumerate() {
+            ptr_value |= (*b as c_ulonglong) << (i * 8);
+        }
+        if ptr_value == 0 {
+            break;
+        }
+        vec.push(read_string(pid, ptr_value));
+        offset += std::mem::size_of::<c_ulonglong>() as isize;
+    }
+
+    vec
 }
 
 pub fn escape_to_string(buf: &Vec<u8>) -> String {

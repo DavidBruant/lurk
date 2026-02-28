@@ -94,7 +94,7 @@ use syscalls::{Sysno, SysnoMap, SysnoSet};
 use uzers::get_user_by_name;
 
 use crate::args::{Args, Filter};
-use crate::syscall_info::{RetCode, SyscallInfo};
+use crate::syscall_info::{RetCode, SyscallInfo, SyscallArgs};
 
 const STRING_LIMIT: usize = 32;
 
@@ -139,7 +139,10 @@ impl<W: Write> Tracer<W> {
     pub fn run_tracer(&mut self) -> Result<()> {
         // Create a hashmap to track entry and exit times across all forked processes individually.
         let mut start_times = HashMap::<Pid, Option<SystemTime>>::new();
+        // Store pre-parsed args for special syscalls (execve/execveat) captured at syscall entry
+        let mut pending_args = HashMap::<Pid, Option<SyscallArgs>>::new();
         start_times.insert(self.pid, None);
+        pending_args.insert(self.pid, None);
 
         let mut options_initialized = false;
         let mut entry_regs = None;
@@ -168,7 +171,29 @@ impl<W: Write> Tracer<W> {
                     // are stopped in PtraceSyscall and not here, which means if we get a SIGTRAP here,
                     // it's because the child called exec.
                     if signal == Signal::SIGTRAP {
-                        self.log_standard_syscall(pid, None, None, None)?;
+                        // At exec the address space may change; prefer registers captured
+                        // at the previous syscall entry (if present) so we can read argv/envp
+                        // from the original address space. Consume `entry_regs` if set.
+                        let regs = entry_regs.take();
+                        let pre = pending_args.remove(&pid).unwrap_or(None);
+
+                        // If we don't have entry registers (e.g. first-stop), try a best-effort
+                        // parse from the current registers before falling back to pointer hex.
+                        if regs.is_none() {
+                            if let Ok(cur_regs) = self.get_registers(pid) {
+                                if let Ok(sysno) = self.get_syscall(cur_regs) {
+                                    if sysno == Sysno::execve || sysno == Sysno::execveat {
+                                        // parse args now
+                                        let args_now = arch::parse_args(pid, sysno, cur_regs);
+                                        self.log_standard_syscall(pid, Some(cur_regs), Some(args_now), None, None)?;
+                                        self.issue_ptrace_syscall_request(pid, None)?;
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+
+                        self.log_standard_syscall(pid, regs, pre, None, None)?;
                         self.issue_ptrace_syscall_request(pid, None)?;
                         continue;
                     }
@@ -215,10 +240,26 @@ impl<W: Write> Tracer<W> {
                 }
                 // The traced process was stopped by a `PTRACE_EVENT_*` event.
                 WaitStatus::PtraceEvent(pid, _, code) => {
-                    // We stop at the PTRACE_EVENT_EXIT event because of the PTRACE_O_TRACEEXIT option.
+                    // Handle exec events specially: try to parse arguments from current
+                    // registers when the kernel notifies about an exec event.
+                    if code == Event::PTRACE_EVENT_EXEC as i32 {
+                        if let Ok(regs) = self.get_registers(pid) {
+                            if let Ok(sysno) = self.get_syscall(regs) {
+                                if sysno == Sysno::execve || sysno == Sysno::execveat {
+                                    let args_now = arch::parse_args(pid, sysno, regs);
+                                    // log immediately using these args
+                                    self.log_standard_syscall(pid, Some(regs), Some(args_now), None, None)?;
+                                }
+                            }
+                        }
+                    }
+
+                    // We also stop at the PTRACE_EVENT_EXIT event because of the PTRACE_O_TRACEEXIT option.
                     // We do this to properly catch and log exit-family syscalls, which do not have an PTRACE_SYSCALL_INFO_EXIT event.
                     if code == Event::PTRACE_EVENT_EXIT as i32 && self.is_exit_syscall(pid)? {
-                        self.log_standard_syscall(pid, None, None, None)?;
+                        // use any pending args if present
+                        let pre = pending_args.remove(&pid).unwrap_or(None);
+                        self.log_standard_syscall(pid, None, pre, None, None)?;
                     }
 
                     self.issue_ptrace_syscall_request(pid, None)?;
@@ -238,16 +279,25 @@ impl<W: Write> Tracer<W> {
                     // We only want to log regular syscalls on exit
                     if let Some(syscall_start_time) = start_times.get_mut(&pid) {
                         if event == 2 {
-                            self.log_standard_syscall(
-                                pid,
-                                entry_regs,
-                                *syscall_start_time,
-                                timestamp,
-                            )?;
+                            let pre = pending_args.remove(&pid).unwrap_or(None);
+                            self.log_standard_syscall(pid, entry_regs, pre, *syscall_start_time, timestamp)?;
                             *syscall_start_time = None;
                         } else {
                             *syscall_start_time = timestamp;
-                            entry_regs = Some(self.get_registers(pid)?);
+                            let regs = self.get_registers(pid)?;
+                            // Save entry registers for later use
+                            entry_regs = Some(regs);
+
+                            // Try to detect exec-like syscalls and pre-parse their args while
+                            // the address space is still intact.
+                            if let Ok(sysno) = self.get_syscall(regs) {
+                                if sysno == Sysno::execve || sysno == Sysno::execveat {
+                                    let args = arch::parse_args(pid, sysno, regs);
+                                    pending_args.insert(pid, Some(args));
+                                } else {
+                                    pending_args.insert(pid, None);
+                                }
+                            }
                         }
                     } else {
                         return Err(anyhow!("Unable to get start time for tracee {}", pid));
@@ -376,6 +426,7 @@ impl<W: Write> Tracer<W> {
         &mut self,
         pid: Pid,
         entry_regs: Option<user_regs_struct>,
+        pre_parsed_args: Option<SyscallArgs>,
         syscall_start_time: Option<SystemTime>,
         syscall_end_time: Option<SystemTime>,
     ) -> Result<()> {
@@ -406,6 +457,7 @@ impl<W: Write> Tracer<W> {
             }
         };
 
+        // Prefer entry registers if provided (they allow reading strings before exec).
         let registers = entry_regs.unwrap_or(registers);
 
         if self.filter.matches(syscall_number, ret_code) {
@@ -419,7 +471,16 @@ impl<W: Write> Tracer<W> {
             }
 
             if !self.args.summary_only {
-                let info = SyscallInfo::new(pid, syscall_number, ret_code, registers, elapsed);
+                // Use pre-parsed args if provided (captured at entry), otherwise parse now.
+                let args = pre_parsed_args.unwrap_or_else(|| arch::parse_args(pid, syscall_number, registers));
+                let info = SyscallInfo {
+                    typ: "SYSCALL",
+                    pid,
+                    syscall: syscall_number,
+                    args,
+                    result: ret_code,
+                    duration: elapsed,
+                };
                 self.write_syscall_info(&info)?;
             }
         }
@@ -489,6 +550,13 @@ impl<W: Write> Tracer<W> {
 
 pub fn run_tracee(command: &[String], envs: &[String], username: &Option<String>) -> Result<()> {
     ptrace::traceme()?;
+    // Stop ourselves so the tracer parent can set ptrace options before exec.
+    // This improves reliability of capturing the initial execve syscall arguments.
+    // Make this behavior conditional: set `LURK_DISABLE_SIGSTOP=1` in the environment
+    // to skip raising SIGSTOP (useful when running under debuggers or wrappers).
+    if std::env::var_os("LURK_DISABLE_SIGSTOP").is_none() {
+        nix::sys::signal::raise(Signal::SIGSTOP).map_err(|_| anyhow!("Unable to raise SIGSTOP"))?;
+    }
     personality::set(Persona::ADDR_NO_RANDOMIZE)
         .map_err(|_| anyhow!("Unable to set ADDR_NO_RANDOMIZE"))?;
     let mut binary = command
