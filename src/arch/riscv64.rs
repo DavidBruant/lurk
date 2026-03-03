@@ -30,7 +30,6 @@ pub static TRACE_DESC: SysnoSet = SysnoSet::new(&[
     unlinkat,
     symlinkat,
     linkat,
-    renameat,
     fstatfs,
     ftruncate,
     fallocate,
@@ -61,7 +60,6 @@ pub static TRACE_DESC: SysnoSet = SysnoSet::new(&[
     splice,
     tee,
     readlinkat,
-    fstatat,
     fstat,
     fsync,
     fdatasync,
@@ -139,7 +137,6 @@ pub static TRACE_FILE: SysnoSet = SysnoSet::new(&[
     unlinkat,
     symlinkat,
     linkat,
-    renameat,
     umount2,
     mount,
     pivot_root,
@@ -154,7 +151,6 @@ pub static TRACE_FILE: SysnoSet = SysnoSet::new(&[
     openat,
     quotactl,
     readlinkat,
-    fstatat,
     fstat,
     utimensat,
     acct,
@@ -226,7 +222,6 @@ pub static TRACE_SIGNAL: SysnoSet = SysnoSet::new(&[
     statfs,
     fstatfs,
     signalfd4,
-    fstatat,
     fstat,
     kill,
     tkill,
@@ -281,10 +276,10 @@ pub static TRACE_MEMORY: SysnoSet = SysnoSet::new(&[
     // riscv_flush_icache,
 ]);
 
-pub static TRACE_STAT: SysnoSet = SysnoSet::new(&[fstatat, fstat, statx]);
+pub static TRACE_STAT: SysnoSet = SysnoSet::new(&[fstat, statx]);
 pub static TRACE_LSTAT: SysnoSet = SysnoSet::new(&[]);
-pub static TRACE_FSTAT: SysnoSet = SysnoSet::new(&[fstatat, fstat, statx]);
-pub static TRACE_STAT_LIKE: SysnoSet = SysnoSet::new(&[fstatat, fstat, statx]);
+pub static TRACE_FSTAT: SysnoSet = SysnoSet::new(&[fstat, statx]);
+pub static TRACE_STAT_LIKE: SysnoSet = SysnoSet::new(&[fstat, statx]);
 pub static TRACE_STATFS: SysnoSet = SysnoSet::new(&[statfs, fstatfs]);
 pub static TRACE_FSTATFS: SysnoSet = SysnoSet::new(&[fstatfs]);
 pub static TRACE_STATFS_LIKE: SysnoSet = SysnoSet::new(&[statfs, fstatfs]);
@@ -360,19 +355,21 @@ const INT: Option<SyscallArgType> = Some(SyscallArgType::Int);
 const STR: Option<SyscallArgType> = Some(SyscallArgType::Str);
 
 pub struct Riscv64Syscalls {
-    _0: [Option<(Sysno, [Option<SyscallArgType>; 6])>; 244],
+    _0: [Option<(Sysno, [Option<SyscallArgType>; 6])>; 38],
+    _39: [Option<(Sysno, [Option<SyscallArgType>; 6])>; 40],
+    _80: [Option<(Sysno, [Option<SyscallArgType>; 6])>; 164],
     _258: [Option<(Sysno, [Option<SyscallArgType>; 6])>; 37],
-    _403: [Option<(Sysno, [Option<SyscallArgType>; 6])>; 12],
-    _416: [Option<(Sysno, [Option<SyscallArgType>; 6])>; 36],
+    _424: [Option<(Sysno, [Option<SyscallArgType>; 6])>; 28],
 }
 
 impl Riscv64Syscalls {
     pub fn get(&self, index: usize) -> Option<&Option<(Sysno, [Option<SyscallArgType>; 6])>> {
         let result = match index {
-            0..=243 => &self._0[index],
-            260..=294 => &self._258[index - 258],
-            403..=414 => &self._403[index - 403],
-            416..=451 => &self._416[index - 416],
+            0..=37 => &self._0[index],
+            39..=78 => &self._39[index - 39],
+            80..=243 => &self._80[index - 80],
+            258..=294 => &self._258[index - 258],
+            424..=451 => &self._424[index - 424],
             _ => return None,
         };
         Some(result)
@@ -427,7 +424,8 @@ pub static SYSCALLS: Riscv64Syscalls = Riscv64Syscalls {
         syscall!(unlinkat, INT, STR, INT),
         syscall!(symlinkat, STR, INT, STR),
         syscall!(linkat, INT, STR, INT, STR, INT),
-        syscall!(renameat, INT, STR, INT, STR),
+    ],
+    _39: [
         syscall!(umount2, STR, INT),
         syscall!(mount, STR, STR, STR, INT, ADDR),
         syscall!(pivot_root, STR, STR),
@@ -468,7 +466,8 @@ pub static SYSCALLS: Riscv64Syscalls = Riscv64Syscalls {
         syscall!(splice, INT, ADDR, INT, ADDR, INT, INT),
         syscall!(tee, INT, INT, INT, INT),
         syscall!(readlinkat, INT, STR, STR, INT),
-        syscall!(fstatat, INT, STR, ADDR, INT),
+    ],
+    _80: [
         syscall!(fstat, INT, ADDR),
         syscall!(sync),
         syscall!(fsync, INT),
@@ -673,31 +672,7 @@ pub static SYSCALLS: Riscv64Syscalls = Riscv64Syscalls {
         syscall!(rseq, ADDR, INT, INT, INT),
         syscall!(kexec_file_load, INT, INT, INT, STR, INT),
     ],
-    _403: [
-        // These time64 syscalls are the same as the original variant on 64-bit systems.
-        syscall!(clock_gettime64, INT, ADDR),
-        syscall!(clock_settime64, INT, ADDR),
-        syscall!(clock_adjtime64, INT, ADDR),
-        syscall!(clock_getres_time64, INT, ADDR),
-        syscall!(clock_nanosleep_time64, INT, INT, ADDR, ADDR),
-        syscall!(timer_gettime64, INT, ADDR),
-        syscall!(timer_settime64, INT, INT, ADDR, ADDR),
-        syscall!(timerfd_gettime64, INT, ADDR),
-        syscall!(timerfd_settime64, INT, INT, ADDR, ADDR),
-        syscall!(utimensat_time64, INT, STR, ADDR, INT),
-        syscall!(pselect6_time64, INT, ADDR, ADDR, ADDR, ADDR, ADDR),
-        syscall!(ppoll_time64, ADDR, INT, ADDR, ADDR, INT),
-    ],
-    _416: [
-        // These time64 syscalls are the same as the original variant on 64-bit systems.
-        syscall!(io_pgetevents_time64, INT, INT, INT, ADDR, ADDR, ADDR),
-        syscall!(recvmmsg_time64, INT, ADDR, INT, INT, ADDR),
-        syscall!(mq_timedsend_time64, INT, STR, INT, INT, ADDR),
-        syscall!(mq_timedreceive_time64, INT, STR, INT, ADDR, ADDR),
-        syscall!(semtimedop_time64, INT, ADDR, INT, ADDR),
-        syscall!(rt_sigtimedwait_time64, ADDR, ADDR, ADDR, INT),
-        syscall!(futex_time64, ADDR, INT, INT, ADDR, ADDR, INT),
-        syscall!(sched_rr_get_interval_time64, INT, ADDR),
+    _424: [
         syscall!(pidfd_send_signal, INT, INT, ADDR, INT),
         syscall!(io_uring_setup, INT, ADDR),
         syscall!(io_uring_enter, INT, INT, INT, INT, ADDR, INT),
@@ -758,14 +733,9 @@ mod tests {
                 assert_eq!(i + 258, sysno.id() as usize);
             }
         }
-        for (i, sysno, ..) in SYSCALLS._403.iter().enumerate() {
+        for (i, sysno, ..) in SYSCALLS._424.iter().enumerate() {
             if let Some((sysno, _)) = sysno {
-                assert_eq!(i + 403, sysno.id() as usize);
-            }
-        }
-        for (i, sysno, ..) in SYSCALLS._416.iter().enumerate() {
-            if let Some((sysno, _)) = sysno {
-                assert_eq!(i + 416, sysno.id() as usize);
+                assert_eq!(i + 424, sysno.id() as usize);
             }
         }
     }
