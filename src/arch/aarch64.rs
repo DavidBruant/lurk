@@ -360,6 +360,7 @@ macro_rules! syscall {
 const ADDR: Option<SyscallArgType> = Some(SyscallArgType::Addr);
 const INT: Option<SyscallArgType> = Some(SyscallArgType::Int);
 const STR: Option<SyscallArgType> = Some(SyscallArgType::Str);
+const STRV: Option<SyscallArgType> = Some(SyscallArgType::StrArray);
 
 pub struct Aarch64Syscalls {
     _0: [Option<(Sysno, [Option<SyscallArgType>; 6])>; 244],
@@ -610,7 +611,7 @@ pub static SYSCALLS: Aarch64Syscalls = Aarch64Syscalls {
         syscall!(request_key, STR, STR, STR, INT),
         syscall!(keyctl, INT, INT, INT, INT, INT),
         syscall!(clone, INT, INT, ADDR, INT, ADDR),
-        syscall!(execve, STR, STR, STR),
+        syscall!(execve, STR, STRV, STRV),
         syscall!(mmap, ADDR, INT, INT, INT, INT, INT),
         syscall!(fadvise64, INT, INT, INT, INT),
         syscall!(swapon, STR, INT),
@@ -656,7 +657,7 @@ pub static SYSCALLS: Aarch64Syscalls = Aarch64Syscalls {
         syscall!(getrandom, STR, INT, INT),
         syscall!(memfd_create, STR, INT),
         syscall!(bpf, INT, ADDR, INT),
-        syscall!(execveat, INT, STR, STR, STR, INT),
+        syscall!(execveat, INT, STR, STRV, STRV, INT),
         syscall!(userfaultfd, INT),
         syscall!(membarrier, INT, INT, INT),
         syscall!(mlock2, INT, INT, INT),

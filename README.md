@@ -328,6 +328,12 @@ See the [tracer](examples/tracer.rs) example.
 - All maintainers of the dependencies used to create lurk and all of those who
   answered my questions regarding `ptrace`.
 
+## Tracing execve arguments
+
+- **Behavior:** The tracer reads `execve`/`execveat` argument vectors (`argv`, `envp`) from the traced process' memory at syscall entry and prints them verbosely. This allows the tracer to show string values instead of raw pointer addresses.
+- **Race avoidance:** To make sure the tracer can set ptrace options before the traced program performs an `exec` (which replaces the address space), by default the traced child raises a `SIGSTOP` after calling `ptrace::traceme()` so the tracer parent can configure options first.
+- **Opt-out:** If you prefer the old behavior (no early `SIGSTOP`), set the environment variable `LURK_DISABLE_SIGSTOP=1` when running the traced program; the tracer will not expect the initial `SIGSTOP` from the child.
+
 ## License
 
 lurk (c) 2022-2023 Jakob Waibel, Yuri Astrakhan, and contributors

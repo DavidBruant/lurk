@@ -61,6 +61,9 @@ pub struct Args {
     /// Display output in JSON format
     #[arg(short, long)]
     pub json: bool,
+    /// Collapse repeated failing `execve` attempts and only show final success
+    #[arg(long)]
+    pub collapse_exec_retries: bool,
     #[command(subcommand)]
     pub command: Option<ArgCommand>,
 }
