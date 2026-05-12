@@ -1,3 +1,6 @@
+use assert_cmd::cargo::*; // Import cargo_bin_cmd! macro and methods
+use predicates::prelude::*; // Used for writing assertions
+
 pub fn add(a: i32, b: i32) -> i32 {
     a + b
 }
@@ -25,4 +28,21 @@ mod tests {
         // Please note, that private functions can be tested too!
         assert_eq!(bad_add(1, 2), 3);
     }
+
+
+
+
+
+    #[test]
+    fn lurk_ls() -> Result<(), Box<dyn std::error::Error>> {
+        let mut cmd = cargo_bin_cmd!("lurk");
+
+        cmd.arg("ls").arg(".");
+        cmd.assert()
+            .stdout(predicate::str::contains("fstat"));
+
+        Ok(())
+    }
 }
+
+
