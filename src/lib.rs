@@ -107,6 +107,9 @@ pub struct Tracer<W: Write> {
     syscalls_pass: SysnoMap<u64>,
     syscalls_fail: SysnoMap<u64>,
     style_config: StyleConfig,
+
+    syscall_infos: Vec<SyscallInfo>,
+
     output: W,
     // If enabled, count and collapse repeated failing execve attempts per pid
     exec_retry_counts: std::collections::HashMap<Pid, usize>,
@@ -129,6 +132,9 @@ impl<W: Write> Tracer<W> {
             syscalls_pass: SysnoMap::from_iter(SysnoSet::all().iter().map(|v| (v, 0))),
             syscalls_fail: SysnoMap::from_iter(SysnoSet::all().iter().map(|v| (v, 0))),
             style_config,
+
+            syscall_infos: Vec::new(),
+
             output,
             exec_retry_counts: HashMap::new(),
         })
@@ -530,7 +536,7 @@ impl<W: Write> Tracer<W> {
                     result: ret_code,
                     duration: elapsed,
                 };
-                self.write_syscall_info(&info)?;
+                self.write_syscall_info(info);
             }
         }
 
@@ -548,11 +554,13 @@ impl<W: Write> Tracer<W> {
             result: RetCode::Ok(0),
             duration: Duration::default(),
         };
-        self.write_syscall_info(&info)?;
+        self.write_syscall_info(info);
         Ok(())
     }
 
-    fn write_syscall_info(&mut self, info: &SyscallInfo) -> Result<()> {
+    fn write_syscall_info(&mut self, info: SyscallInfo) -> () {
+        self.syscall_infos.push(info);
+        /*
         if self.args.json {
             let json = serde_json::to_string(&info)?;
             Ok(writeln!(&mut self.output, "{json}")?)
@@ -565,6 +573,7 @@ impl<W: Write> Tracer<W> {
                 &mut self.output,
             )
         }
+         */
     }
 
     // Issue a PTRACE_SYSCALL request to the tracee, forwarding a signal if one is provided.
