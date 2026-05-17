@@ -20,7 +20,6 @@
 //!
 //! ```rust
 //! use anyhow::{bail, Result};
-//! use console::Style;
 //! use lurk_cli::{args::Args, style::StyleConfig, Tracer};
 //! use nix::unistd::{fork, ForkResult};
 //! use std::io;
@@ -38,16 +37,8 @@
 //!
 //!     let args = Args::default();
 //!     let output = io::stdout();
-//!     let style = StyleConfig {
-//!         pid: Style::new().cyan(),
-//!         syscall: Style::new().white().bold(),
-//!         success: Style::new().green(),
-//!         error: Style::new().red(),
-//!         result: Style::new().yellow(),
-//!         use_colors: true,
-//!     };
 //!
-//!     Tracer::new(pid, args, output, style)?.run_tracer()
+//!     Tracer::new(pid, args, output)?.run_tracer()
 //! }
 //! ```
 //!
@@ -89,26 +80,21 @@ use std::io::Write;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime};
-use style::StyleConfig;
 use syscalls::{Sysno, SysnoMap, SysnoSet};
 use uzers::get_user_by_name;
 
 use crate::args::{Args, Filter};
 use crate::syscall_info::{RetCode, SyscallArgs, SyscallInfo};
 
-const STRING_LIMIT: usize = 32;
-
 pub struct Tracer<W: Write> {
     pid: Pid,
     args: Args,
-    string_limit: Option<usize>,
     filter: Filter,
     syscalls_time: SysnoMap<Duration>,
     syscalls_pass: SysnoMap<u64>,
     syscalls_fail: SysnoMap<u64>,
-    style_config: StyleConfig,
 
-    syscall_infos: Vec<SyscallInfo>,
+    pub syscall_infos: Vec<SyscallInfo>,
 
     output: W,
     // If enabled, count and collapse repeated failing execve attempts per pid
@@ -116,22 +102,16 @@ pub struct Tracer<W: Write> {
 }
 
 impl<W: Write> Tracer<W> {
-    pub fn new(pid: Pid, args: Args, output: W, style_config: StyleConfig) -> Result<Self> {
+    pub fn new(pid: Pid, args: Args, output: W) -> Result<Self> {
         Ok(Self {
             pid,
             filter: args.create_filter()?,
-            string_limit: if args.no_abbrev {
-                None
-            } else {
-                Some(args.string_limit.unwrap_or(STRING_LIMIT))
-            },
             args,
             syscalls_time: SysnoMap::from_iter(
                 SysnoSet::all().iter().map(|v| (v, Duration::default())),
             ),
             syscalls_pass: SysnoMap::from_iter(SysnoSet::all().iter().map(|v| (v, 0))),
             syscalls_fail: SysnoMap::from_iter(SysnoSet::all().iter().map(|v| (v, 0))),
-            style_config,
 
             syscall_infos: Vec::new(),
 
@@ -352,6 +332,7 @@ impl<W: Write> Tracer<W> {
             }
         }
 
+        
         if !self.args.json && (self.args.summary_only || self.args.summary) {
             if !self.args.summary_only {
                 // Make a gap between the last syscall and the summary
@@ -359,6 +340,7 @@ impl<W: Write> Tracer<W> {
             }
             self.report_summary()?;
         }
+
 
         Ok(())
     }

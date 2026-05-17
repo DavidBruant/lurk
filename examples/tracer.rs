@@ -1,6 +1,5 @@
 use anyhow::{bail, Result};
-use console::Style;
-use lurk_cli::{args::Args, style::StyleConfig, Tracer};
+use lurk_cli::{args::Args, Tracer};
 use nix::unistd::{fork, ForkResult};
 use std::io;
 
@@ -17,14 +16,6 @@ fn main() -> Result<()> {
 
     let args = Args::default();
     let output = io::stdout();
-    let style = StyleConfig {
-        pid: Style::new().cyan(),
-        syscall: Style::new().white().bold(),
-        success: Style::new().green(),
-        error: Style::new().red(),
-        result: Style::new().yellow(),
-        use_colors: true,
-    };
 
-    Tracer::new(pid, args, output, style)?.run_tracer()
+    Tracer::new(pid, args, output)?.run_tracer()
 }

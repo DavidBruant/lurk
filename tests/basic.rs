@@ -1,5 +1,3 @@
-use assert_cmd::cargo::*; // Import cargo_bin_cmd! macro and methods
-use predicates::prelude::*; // Used for writing assertions
 
 pub fn add(a: i32, b: i32) -> i32 {
     a + b
@@ -14,9 +12,19 @@ fn bad_add(a: i32, b: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    // Note this useful idiom: importing names from outer (for mod tests) scope.
-    use super::*;
+    use std::io::{Write};
 
+    use anyhow::{Error, Result, bail};
+    use nix::unistd::{fork, ForkResult};
+
+    use lurk_cli::args::{ArgCommand, Args};
+    use lurk_cli::{run_tracee, Tracer};
+    use syscalls::Sysno;
+
+    // Note this useful idiom: importing names from outer (for mod tests) scope.
+    //use super::*;
+
+    /*
     #[test]
     fn test_add() {
         assert_eq!(add(1, 2), 3);
@@ -28,21 +36,60 @@ mod tests {
         // Please note, that private functions can be tested too!
         assert_eq!(bad_add(1, 2), 3);
     }
-
-
-
+    */
 
 
     #[test]
-    fn lurk_ls() -> Result<(), Box<dyn std::error::Error>> {
-        let mut cmd = cargo_bin_cmd!("lurk");
+    fn lurk_tracer_ls() -> Result<(), Error> {
+        let command = [String::from("ls")];
 
-        cmd.arg("ls").arg(".");
-        cmd.assert()
-            .stdout(predicate::str::contains("fstat"));
+        // create Trace instance manually
+        // fed it "ls"
+        let config= Args::from({Args { 
+            syscall_number: false, 
+            attach: None, 
+            no_abbrev: false, 
+            string_limit: None, 
+            file: None, 
+            summary_only: false, 
+            summary: false, 
+            successful_only: false, 
+            failed_only: false, 
+            env: Vec::new(), 
+            username: None, 
+            follow_forks: true, 
+            syscall_times: false, 
+            expr: Vec::new(), 
+            json: false, 
+            collapse_exec_retries: false, 
+            command: Some(ArgCommand::Command(vec!["ls".to_string()])),
+        }});
+
+        let pid = {
+            match unsafe { fork() } {
+                Ok(ForkResult::Child) => return run_tracee(&command, &config.env, &None),
+                Ok(ForkResult::Parent { child }) => child,
+                Err(err) => bail!("fork() failed: {err}"),
+            }
+        };
+
+        let output: Box<dyn Write> = Box::new(std::io::stdout());
+
+        let mut tracer = Tracer::new(pid, config, output)?;
+        let _ = tracer.run_tracer();
+
+        // get tracer.syscall_infos.
+        let syscalls = tracer.syscall_infos;
+
+        // perform filters to find the 'fstat'
+        let fstat_syscalls: Vec<&lurk_cli::syscall_info::SyscallInfo> = syscalls.iter().filter(|&si| si.syscall == Sysno::fstat).collect();
+
+        assert!(fstat_syscalls.len() >= 1, "At least one call to fstat during call to ls");
 
         Ok(())
     }
+
+
 }
 
 

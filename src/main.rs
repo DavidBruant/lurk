@@ -1,9 +1,8 @@
 use std::fs::OpenOptions;
-use std::io::{self, BufWriter, IsTerminal, Write};
+use std::io::{BufWriter, Write};
 
 use anyhow::{bail, Context, Result};
 use clap::{CommandFactory, Parser};
-use lurk_cli::style::StyleConfig;
 use nix::sys::ptrace;
 use nix::unistd::{fork, ForkResult, Pid};
 
@@ -37,9 +36,7 @@ fn main() -> Result<()> {
     };
 
     // TODO: we may also add a --color option to force colors, and a --no-color option to disable it
-    let mut style_config = StyleConfig::default();
     let output: Box<dyn Write> = if let Some(filepath) = &config.file {
-        style_config.use_colors = false;
         Box::new(BufWriter::new(
             OpenOptions::new()
                 .create(true)
@@ -47,9 +44,8 @@ fn main() -> Result<()> {
                 .open(filepath)?,
         ))
     } else {
-        style_config.use_colors = io::stdout().is_terminal();
         Box::new(std::io::stdout())
     };
 
-    Tracer::new(pid, config, output, style_config)?.run_tracer()
+    Tracer::new(pid, config, output)?.run_tracer()
 }
