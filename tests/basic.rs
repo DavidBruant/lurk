@@ -13,6 +13,7 @@ fn bad_add(a: i32, b: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use std::io::{self, IsTerminal, Write};
+    use lurk_cli::syscall_info::{SyscallArg, SyscallInfo};
     use syscalls::Sysno;
     
     use anyhow::{Error, Result, bail};
@@ -88,12 +89,8 @@ mod tests {
         // get tracer.syscall_infos.
         let syscalls = tracer.syscall_infos;
 
-        println!("{} syscalls", syscalls.len());
-
         // perform filters to find the 'fstat'
-        let fstat_syscalls: Vec<&lurk_cli::syscall_info::SyscallInfo> = syscalls.iter().filter(|&si| si.syscall == Sysno::fstat).collect();
-
-        println!("{} syscalls fstat", fstat_syscalls.len());
+            let fstat_syscalls: Vec<&lurk_cli::syscall_info::SyscallInfo> = syscalls.iter().filter(|&si| si.syscall == Sysno::fstat).collect();
 
         assert!(fstat_syscalls.len() >= 1, "At least one call to fstat during call to ls");
 
@@ -141,21 +138,58 @@ mod tests {
         let output: Box<dyn Write> = Box::new(std::io::stdout());
 
         let mut tracer = Tracer::new(child_pid, config, output)?;
-        let _ = tracer.run_tracer();
+        let _ = tracer.run_tracer() ;
 
         // get tracer.syscall_infos.
         let syscalls = tracer.syscall_infos;
 
         // perform filters to find the 'fstat'
-        let openat_syscalls: Vec<&lurk_cli::syscall_info::SyscallInfo> = syscalls.iter().filter(|&si| si.syscall == Sysno::openat).collect();
-
-        assert!(openat_syscalls.len() >= 1, "At least one call to openat during call to ls");
-
+        let openat_syscalls = syscalls.iter()
+            .filter(|&si| si.syscall == Sysno::openat);
+            
+        // impl Iterator<Item = &SyscallInfo> 
 
         let mut output: Box<dyn Write> = Box::new(std::io::stdout());
 
-        for syscall in openat_syscalls {
+        for syscall in openat_syscalls.clone() {
+            //let (i, &syscall): (usize, &SyscallInfo) = syscall; // here
             let _ = syscall.write_syscall(style_config.clone(), None, true, false, &mut output);
+        }
+
+        assert!(openat_syscalls.clone().count() >= 1, "At least one call to openat during call to ls");
+
+
+        // les syscall_infos sont owned par 'syscalls'
+        // le reste ne peut que borrow par reférence
+        // qui devrait posséder les syscalls ?
+
+        let succesful_openat_syscalls = openat_syscalls
+            // keep succesful open
+            .filter(|&osi| match osi.result{
+                lurk_cli::syscall_info::RetCode::Ok(_) => {true}
+                lurk_cli::syscall_info::RetCode::Err(_) => {false}
+
+                lurk_cli::syscall_info::RetCode::Address(_) => {false}
+            });
+
+
+
+        let opened_second_args = succesful_openat_syscalls
+            .map(|osi| osi.args.0.iter().nth(1));
+            
+
+
+        println!("Open files (openat syscall)");
+        for arg in opened_second_args {
+            match arg {
+                Some(val) => match val {
+                    lurk_cli::syscall_info::SyscallArg::Int(_) => todo!(),
+                    lurk_cli::syscall_info::SyscallArg::Str(s) => println!("{}", s),
+                    lurk_cli::syscall_info::SyscallArg::StrVec(items, _) => todo!(),
+                    lurk_cli::syscall_info::SyscallArg::Addr(_) => todo!(),
+                },
+                None => println!("No [1] argument for openat"),
+            }
         }
 
         Ok(())
