@@ -1017,7 +1017,7 @@ pub fn get_arg_value(registers: user_regs_struct, i: usize) -> c_ulonglong {
         0 => registers.rdi,
         1 => registers.rsi,
         2 => registers.rdx,
-        3 => registers.r10,
+        3 => registers.r10, // TODO verify whether it should be registers.rcx
         4 => registers.r8,
         5 => registers.r9,
         v => panic!("Invalid system call index {v}!"),
