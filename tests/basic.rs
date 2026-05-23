@@ -13,7 +13,6 @@ fn bad_add(a: i32, b: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use std::io::{self, IsTerminal, Write};
-    use lurk_cli::syscall_info::{SyscallArg, SyscallInfo};
     use syscalls::Sysno;
     
     use anyhow::{Error, Result, bail};
@@ -147,23 +146,16 @@ mod tests {
         let openat_syscalls = syscalls.iter()
             .filter(|&si| si.syscall == Sysno::openat);
             
-        // impl Iterator<Item = &SyscallInfo> 
-
         let mut output: Box<dyn Write> = Box::new(std::io::stdout());
 
         for syscall in openat_syscalls.clone() {
-            //let (i, &syscall): (usize, &SyscallInfo) = syscall; // here
             let _ = syscall.write_syscall(style_config.clone(), None, true, false, &mut output);
         }
 
         assert!(openat_syscalls.clone().count() >= 1, "At least one call to openat during call to ls");
 
-
-        // les syscall_infos sont owned par 'syscalls'
-        // le reste ne peut que borrow par reférence
-        // qui devrait posséder les syscalls ?
-
-        let succesful_openat_syscalls = openat_syscalls
+        /*
+        let succesful_openat_syscalls = openat_syscalls.clone()
             // keep succesful open
             .filter(|&osi| match osi.result{
                 lurk_cli::syscall_info::RetCode::Ok(_) => {true}
@@ -171,26 +163,33 @@ mod tests {
 
                 lurk_cli::syscall_info::RetCode::Address(_) => {false}
             });
+        */
 
-
-
-        let opened_second_args = succesful_openat_syscalls
-            .map(|osi| osi.args.0.iter().nth(1));
-            
-
-
-        println!("Open files (openat syscall)");
-        for arg in opened_second_args {
-            match arg {
+        let attempted_opened_filepaths = openat_syscalls.clone()
+            .map(|osi| match osi.args.0.iter().nth(1) {
                 Some(val) => match val {
-                    lurk_cli::syscall_info::SyscallArg::Int(_) => todo!(),
-                    lurk_cli::syscall_info::SyscallArg::Str(s) => println!("{}", s),
-                    lurk_cli::syscall_info::SyscallArg::StrVec(items, _) => todo!(),
-                    lurk_cli::syscall_info::SyscallArg::Addr(_) => todo!(),
+                    lurk_cli::syscall_info::SyscallArg::Int(_) => None,
+                    lurk_cli::syscall_info::SyscallArg::Str(s) => Some(s),
+                    lurk_cli::syscall_info::SyscallArg::StrVec(_items, _) => None,
+                    lurk_cli::syscall_info::SyscallArg::Addr(_) => None,
                 },
-                None => println!("No [1] argument for openat"),
+                None => None
+            });
+
+        assert!(
+            attempted_opened_filepaths.clone().any(|filepath| filepath.unwrap() == ".gitignore"),
+            "'.gitignore' should be one of the filepath opened"
+        );      
+
+        println!("Files attempted to be opened (openat syscall)");
+        
+        for arg in attempted_opened_filepaths {
+            match arg {
+                Some(filepath) => println!("{}", filepath),
+                None => println!("No [1] argument for openat")
             }
         }
+
 
         Ok(())
     }
