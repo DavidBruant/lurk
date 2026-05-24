@@ -84,7 +84,7 @@ use syscalls::{Sysno, SysnoMap, SysnoSet};
 use uzers::get_user_by_name;
 
 use crate::args::{Args, Filter};
-use crate::syscall_info::{RetCode, SyscallArgs, SyscallInfo};
+use crate::syscall_info::{RetCode, SyscallArg, SyscallArgs, SyscallInfo};
 
 pub struct Tracer<W: Write> {
     pid: Pid,
@@ -431,6 +431,29 @@ impl<W: Write> Tracer<W> {
 
         Ok(())
     }
+
+    pub fn get_opened_files(&self) -> Result<impl Iterator<Item = &String>>{
+        
+        // PPP add other open* syscalls
+        let openat_syscalls = self.syscall_infos.iter()
+            .filter(|&si| si.syscall == Sysno::openat);
+
+
+        let attempted_opened_filepaths = openat_syscalls
+            .map(|osi| match osi.args.0.iter().nth(1) {
+                Some(val) => match val {
+                    SyscallArg::Int(_) => None,
+                    SyscallArg::Str(s) => Some(s),
+                    SyscallArg::StrVec(_items, _) => None,
+                    SyscallArg::Addr(_) => None,
+                },
+                None => None
+            })
+            .map(|filepath| filepath.unwrap());
+
+        return Ok(attempted_opened_filepaths)
+    }
+
 
     fn log_standard_syscall(
         &mut self,

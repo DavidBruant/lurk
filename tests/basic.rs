@@ -12,13 +12,12 @@ fn bad_add(a: i32, b: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{self, IsTerminal, Write};
+    use std::io::{Write};
     use syscalls::Sysno;
     
     use anyhow::{Error, Result, bail};
     use nix::unistd::{fork, ForkResult};
     
-    use lurk_cli::style::StyleConfig;
     use lurk_cli::args::{ArgCommand, Args};
     use lurk_cli::{run_tracee, Tracer};
 
@@ -89,7 +88,7 @@ mod tests {
         let syscalls = tracer.syscall_infos;
 
         // perform filters to find the 'fstat'
-            let fstat_syscalls: Vec<&lurk_cli::syscall_info::SyscallInfo> = syscalls.iter().filter(|&si| si.syscall == Sysno::fstat).collect();
+        let fstat_syscalls: Vec<&lurk_cli::syscall_info::SyscallInfo> = syscalls.iter().filter(|&si| si.syscall == Sysno::fstat).collect();
 
         assert!(fstat_syscalls.len() >= 1, "At least one call to fstat during call to ls");
 
@@ -100,11 +99,6 @@ mod tests {
     #[test]
     fn exec_tracer_cat() -> Result<(), Error> {
         let command = [String::from("cat"), String::from(".gitignore")];
-
-        let mut style_config = StyleConfig::default();
-
-        style_config.use_colors = io::stdout().is_terminal();
-
 
         let config= Args::from({Args { 
             syscall_number: false, 
@@ -139,55 +133,17 @@ mod tests {
         let mut tracer = Tracer::new(child_pid, config, output)?;
         let _ = tracer.run_tracer() ;
 
-        // get tracer.syscall_infos.
-        let syscalls = tracer.syscall_infos;
-
-        // perform filters to find the 'fstat'
-        let openat_syscalls = syscalls.iter()
-            .filter(|&si| si.syscall == Sysno::openat);
-            
-        let mut output: Box<dyn Write> = Box::new(std::io::stdout());
-
-        for syscall in openat_syscalls.clone() {
-            let _ = syscall.write_syscall(style_config.clone(), None, true, false, &mut output);
-        }
-
-        assert!(openat_syscalls.clone().count() >= 1, "At least one call to openat during call to ls");
-
-        /*
-        let succesful_openat_syscalls = openat_syscalls.clone()
-            // keep succesful open
-            .filter(|&osi| match osi.result{
-                lurk_cli::syscall_info::RetCode::Ok(_) => {true}
-                lurk_cli::syscall_info::RetCode::Err(_) => {false}
-
-                lurk_cli::syscall_info::RetCode::Address(_) => {false}
-            });
-        */
-
-        let attempted_opened_filepaths = openat_syscalls.clone()
-            .map(|osi| match osi.args.0.iter().nth(1) {
-                Some(val) => match val {
-                    lurk_cli::syscall_info::SyscallArg::Int(_) => None,
-                    lurk_cli::syscall_info::SyscallArg::Str(s) => Some(s),
-                    lurk_cli::syscall_info::SyscallArg::StrVec(_items, _) => None,
-                    lurk_cli::syscall_info::SyscallArg::Addr(_) => None,
-                },
-                None => None
-            });
+        let mut attempted_opened_filepaths = tracer.get_opened_files().unwrap();
 
         assert!(
-            attempted_opened_filepaths.clone().any(|filepath| filepath.unwrap() == ".gitignore"),
+            attempted_opened_filepaths.any(|filepath| filepath == ".gitignore"),
             "'.gitignore' should be one of the filepath opened"
         );      
 
         println!("Files attempted to be opened (openat syscall)");
         
-        for arg in attempted_opened_filepaths {
-            match arg {
-                Some(filepath) => println!("{}", filepath),
-                None => println!("No [1] argument for openat")
-            }
+        for filepath in attempted_opened_filepaths {
+            println!("{}", filepath);
         }
 
 
