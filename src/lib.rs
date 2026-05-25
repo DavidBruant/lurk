@@ -493,6 +493,7 @@ impl<W: Write> Tracer<W> {
         };
 
         // Prefer entry registers if provided (they allow reading strings before exec).
+        // This means that either entry or exit registers are read
         let registers = entry_regs.unwrap_or(registers);
 
         // Special handling: collapse repeated failing execve attempts if enabled.

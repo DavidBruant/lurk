@@ -34,8 +34,16 @@ To run tests :
 cargo nextest run
 ```
 
+or
+
+```sh
+cargo nextest run --no-capture
+```
+
+
 There were failures with `cargo tests` as soon as i had 2 tests (they ran fine individually)
 I haven't inverstigated, but suppose there is a problem with creating 2 Tracer instances simulteneously
+
 
 
 

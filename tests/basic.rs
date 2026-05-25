@@ -150,6 +150,64 @@ mod tests {
         Ok(())
     }
 
+   
+    #[test]
+    fn exec_tracer_less() -> Result<(), Error> {
+        let command = [String::from("cat"), String::from(".gitignore")];
+
+        let config= Args::from({Args { 
+            syscall_number: false, 
+            attach: None, 
+            no_abbrev: false, 
+            string_limit: None, 
+            file: None, 
+            summary_only: false, 
+            summary: false, 
+            successful_only: false, 
+            failed_only: false, 
+            env: Vec::new(), 
+            username: None, 
+            follow_forks: true, 
+            syscall_times: false, 
+            expr: Vec::new(), 
+            json: false, 
+            collapse_exec_retries: false,
+            command: Some(ArgCommand::Command(vec![])),
+        }});
+
+        let child_pid = {
+            match unsafe { fork() } {
+                Ok(ForkResult::Child) => return run_tracee(&command, &config.env, &None),
+                Ok(ForkResult::Parent { child }) => child,
+                Err(err) => bail!("fork() failed: {err}"),
+            }
+        };
+
+        let output: Box<dyn Write> = Box::new(std::io::stdout());
+
+        let mut tracer = Tracer::new(child_pid, config, output)?;
+        let _ = tracer.run_tracer() ;
+
+        let mut attempted_opened_filepaths = tracer.get_opened_files().unwrap();
+
+        assert!(
+            attempted_opened_filepaths.any(|filepath| filepath == ".gitignore"),
+            "'.gitignore' should be one of the filepath opened"
+        );      
+
+        println!("Files attempted to be opened (openat syscall)");
+        
+        for filepath in attempted_opened_filepaths {
+            println!("{}", filepath);
+        }
+
+
+        Ok(())
+    }
+
+
+
+
 
 }
 
