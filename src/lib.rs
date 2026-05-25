@@ -96,6 +96,7 @@ pub struct Tracer<W: Write> {
 
     pub syscall_infos: Vec<SyscallInfo>,
 
+
     output: W,
     // If enabled, count and collapse repeated failing execve attempts per pid
     exec_retry_counts: std::collections::HashMap<Pid, usize>,
@@ -269,9 +270,10 @@ impl<W: Write> Tracer<W> {
                 // Tracee is traced with the PTRACE_O_TRACESYSGOOD option.
                 WaitStatus::PtraceSyscall(pid) => {
                     // ptrace(PTRACE_GETEVENTMSG,...) can be one of three values here:
-                    // 1) PTRACE_SYSCALL_INFO_NONE
-                    // 2) PTRACE_SYSCALL_INFO_ENTRY
-                    // 3) PTRACE_SYSCALL_INFO_EXIT
+                    // https://github.com/torvalds/linux/blob/e7ae89a0c97ce2b68b0983cd01eda67cf373517d/include/uapi/linux/ptrace.h#L78-L80
+                    // 1) PTRACE_SYSCALL_INFO_NONE (0)
+                    // 2) PTRACE_SYSCALL_INFO_ENTRY (1)
+                    // 3) PTRACE_SYSCALL_INFO_EXIT (2)
                     let event = ptrace::getevent(pid)? as u8;
 
                     // Snapshot current time, to avoid polluting the syscall time with
@@ -280,7 +282,7 @@ impl<W: Write> Tracer<W> {
 
                     // We only want to log regular syscalls on exit
                     if let Some(syscall_start_time) = start_times.get_mut(&pid) {
-                        if event == 2 {
+                        if event == 2 { // PTRACE_SYSCALL_INFO_EXIT
                             let pre = pending_args.remove(&pid).unwrap_or(None);
                             self.log_standard_syscall(
                                 pid,
@@ -290,7 +292,7 @@ impl<W: Write> Tracer<W> {
                                 timestamp,
                             )?;
                             *syscall_start_time = None;
-                        } else {
+                        } else { // PTRACE_SYSCALL_INFO_ENTRY and PTRACE_SYSCALL_INFO_NONE
                             *syscall_start_time = timestamp;
                             let regs = self.get_registers(pid)?;
                             // Save entry registers for later use
