@@ -1,5 +1,6 @@
 use crate::arch::parse_args;
 use crate::style::StyleConfig;
+use im::HashMap;
 use libc::{c_ulonglong, user_regs_struct};
 use libc::{
     MAP_ANONYMOUS, MAP_FIXED, MAP_LOCKED, MAP_NONBLOCK, MAP_NORESERVE, MAP_POPULATE, MAP_PRIVATE,
@@ -13,8 +14,11 @@ use std::borrow::Cow::{self, Borrowed, Owned};
 use std::fmt::{Debug, Display};
 use std::io;
 use std::io::Write;
+use std::os::fd::RawFd;
 use std::time::Duration;
 use syscalls::Sysno;
+
+pub type FdToPathname = HashMap<RawFd, String>;
 
 #[derive(Debug)]
 pub struct SyscallInfo {
@@ -24,6 +28,7 @@ pub struct SyscallInfo {
     pub args: SyscallArgs,
     pub result: RetCode,
     pub duration: Duration,
+    pub fd_to_pathname: FdToPathname
 }
 
 impl SyscallInfo {
@@ -33,6 +38,7 @@ impl SyscallInfo {
         ret_code: RetCode,
         registers: user_regs_struct,
         duration: Duration,
+        fd_to_pathname: FdToPathname
     ) -> Self {
         Self {
             typ: "SYSCALL",
@@ -41,6 +47,7 @@ impl SyscallInfo {
             args: parse_args(pid, syscall, registers),
             result: ret_code,
             duration,
+            fd_to_pathname
         }
     }
 
