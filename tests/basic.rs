@@ -133,10 +133,10 @@ mod tests {
         let mut tracer = Tracer::new(child_pid, config, output)?;
         let _ = tracer.run_tracer() ;
 
-        let mut attempted_opened_filepaths = tracer.get_opened_files().unwrap();
+        let attempted_opened_filepaths = tracer.get_opened_files().unwrap();
 
         assert!(
-            attempted_opened_filepaths.any(|filepath| filepath == ".gitignore"),
+            attempted_opened_filepaths.clone().any(|filepath| filepath == ".gitignore"),
             "'.gitignore' should be one of the filepath opened"
         );      
 
@@ -153,7 +153,7 @@ mod tests {
    
     #[test]
     fn exec_tracer_less() -> Result<(), Error> {
-        let command = [String::from("cat"), String::from(".gitignore")];
+        let command = [String::from("less"), String::from(".gitignore")];
 
         let config= Args::from({Args { 
             syscall_number: false, 
@@ -188,26 +188,22 @@ mod tests {
         let mut tracer = Tracer::new(child_pid, config, output)?;
         let _ = tracer.run_tracer() ;
 
-        let mut attempted_opened_filepaths = tracer.get_opened_files().unwrap();
+        let read_filepaths = tracer.get_read_files().unwrap();
 
         assert!(
-            attempted_opened_filepaths.any(|filepath| filepath == ".gitignore"),
-            "'.gitignore' should be one of the filepath opened"
+            read_filepaths.clone().any(|filepath| filepath == ".gitignore"),
+            "'.gitignore' should be read by a call to less"
         );      
 
-        println!("Files attempted to be opened (openat syscall)");
+        println!("Files read (read syscall)");
         
-        for filepath in attempted_opened_filepaths {
+        for filepath in read_filepaths {
             println!("{}", filepath);
         }
 
 
         Ok(())
     }
-
-
-
-
 
 }
 
