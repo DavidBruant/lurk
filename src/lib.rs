@@ -68,13 +68,14 @@ use comfy_table::modifiers::UTF8_ROUND_CORNERS;
 use comfy_table::presets::UTF8_BORDERS_ONLY;
 use comfy_table::CellAlignment::Right;
 use comfy_table::{Cell, ContentArrangement, Row, Table};
+use im::HashMap as ImmHashMap;
+use std::collections::HashMap;
 use libc::user_regs_struct;
 use nix::sys::personality::{self, Persona};
 use nix::sys::ptrace::{self, Event};
 use nix::sys::signal::Signal;
 use nix::sys::wait::{wait, WaitStatus};
 use nix::unistd::Pid;
-use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::os::unix::process::CommandExt;
@@ -84,7 +85,7 @@ use syscalls::{Sysno, SysnoMap, SysnoSet};
 use uzers::get_user_by_name;
 
 use crate::args::{Args, Filter};
-use crate::syscall_info::{RetCode, SyscallArg, SyscallArgs, SyscallInfo};
+use crate::syscall_info::{FdToPathname, RetCode, SyscallArg, SyscallArgs, SyscallInfo};
 
 pub struct Tracer<W: Write> {
     pid: Pid,
@@ -95,7 +96,7 @@ pub struct Tracer<W: Write> {
     syscalls_fail: SysnoMap<u64>,
 
     pub syscall_infos: Vec<SyscallInfo>,
-
+    fd_to_path_per_pid: ImmHashMap<Pid, FdToPathname>,
 
     output: W,
     // If enabled, count and collapse repeated failing execve attempts per pid
@@ -104,6 +105,9 @@ pub struct Tracer<W: Write> {
 
 impl<W: Write> Tracer<W> {
     pub fn new(pid: Pid, args: Args, output: W) -> Result<Self> {
+        let mut fd_to_path_per_pid = ImmHashMap::new();
+        fd_to_path_per_pid = fd_to_path_per_pid.update(pid, ImmHashMap::new());
+
         Ok(Self {
             pid,
             filter: args.create_filter()?,
@@ -115,6 +119,7 @@ impl<W: Write> Tracer<W> {
             syscalls_fail: SysnoMap::from_iter(SysnoSet::all().iter().map(|v| (v, 0))),
 
             syscall_infos: Vec::new(),
+            fd_to_path_per_pid: fd_to_path_per_pid,
 
             output,
             exec_retry_counts: HashMap::new(),
@@ -434,7 +439,7 @@ impl<W: Write> Tracer<W> {
         Ok(())
     }
 
-    pub fn get_opened_files(&self) -> Result<impl Iterator<Item = &String>>{
+    pub fn get_opened_files(&self) -> Result<impl Iterator<Item = &String> + Clone>{
         
         // PPP add other open* syscalls
         let openat_syscalls = self.syscall_infos.iter()
@@ -454,6 +459,36 @@ impl<W: Write> Tracer<W> {
             .map(|filepath| filepath.unwrap());
 
         return Ok(attempted_opened_filepaths)
+    }
+
+    pub fn get_read_files(&self) -> Result<impl Iterator<Item = &String> + Clone>{
+        // get read syscalls for which return value is >= 1 (read at least one byte from file)
+        let read_at_least_one_byte_syscalls = self.syscall_infos.iter()
+            .filter(|&si| si.syscall == Sysno::read && match si.result {
+                RetCode::Address(_) => false,
+                RetCode::Err(_) => false,
+                RetCode::Ok(read) => read >= 1 
+            });
+
+        // get the filepath corresponding to this fd 
+        let read_filepaths = read_at_least_one_byte_syscalls
+            .map(|osi| {
+                let fd: i32 = match &osi.args.0[0] {
+                    SyscallArg::Int(i) => *i as i32,
+                    SyscallArg::Str(_s) => panic!("First arg of read syscall should be a fd not a Str"),
+                    SyscallArg::StrVec(_items, _) => panic!("First arg of read syscall should be a fd not a StrVec"),
+                    SyscallArg::Addr(_) => panic!("First arg of read syscall should be a fd not an Addr"),
+                };
+
+                let pathname = osi.fd_to_pathname.get(&fd);
+
+                match pathname {
+                    None => panic!("Did not find corresponding pathname for fd {}", fd),
+                    Some(pathname) => pathname
+                }
+            });
+
+        return Ok(read_filepaths)
     }
 
 
@@ -533,6 +568,11 @@ impl<W: Write> Tracer<W> {
             }
 
             if !self.args.summary_only {
+                let fd_to_pathname = match self.fd_to_path_per_pid.get(&pid) {
+                    None => panic!("No fd_to_path found for pid {}", pid),
+                    Some(map) => map
+                };
+
                 // Use pre-parsed args if provided (captured at entry), otherwise parse now.
                 let args = pre_parsed_args
                     .unwrap_or_else(|| arch::parse_args(pid, syscall_number, registers));
@@ -543,6 +583,7 @@ impl<W: Write> Tracer<W> {
                     args,
                     result: ret_code,
                     duration: elapsed,
+                    fd_to_pathname: fd_to_pathname.clone() // maybe this clone is a performance problem. Maybe not
                 };
                 self.write_syscall_info(info);
             }
@@ -552,6 +593,11 @@ impl<W: Write> Tracer<W> {
     }
 
     fn log_exec_event(&mut self, pid: Pid, args: SyscallArgs) -> Result<()> {
+        let fd_to_pathname = match self.fd_to_path_per_pid.get(&pid) {
+            None => panic!("No fd_to_path found for pid {}", pid),
+            Some(map) => map
+        };
+
         // Construct a SyscallInfo-like record for exec events. Mark result as Ok(0)
         // since PTRACE_EVENT_EXEC means the exec completed successfully.
         let info = SyscallInfo {
@@ -561,27 +607,79 @@ impl<W: Write> Tracer<W> {
             args,
             result: RetCode::Ok(0),
             duration: Duration::default(),
+            fd_to_pathname: fd_to_pathname.clone() // maybe this clone is a performance problem. Maybe not
+            // PPP add fd => pathname association
         };
         self.write_syscall_info(info);
         Ok(())
     }
 
-    fn write_syscall_info(&mut self, info: SyscallInfo) -> () {
-        self.syscall_infos.push(info);
-        /*
-        if self.args.json {
-            let json = serde_json::to_string(&info)?;
-            Ok(writeln!(&mut self.output, "{json}")?)
-        } else {
-            info.write_syscall(
-                self.style_config.clone(),
-                self.string_limit,
-                self.args.syscall_number,
-                self.args.syscall_times,
-                &mut self.output,
-            )
+    fn write_syscall_info(&mut self, syscall_info: SyscallInfo) -> () {
+        // update self.fd_to_path_per_pid
+        // if syscall is a open*, associate the path used as argument with the fd returned as result
+        if syscall_info.syscall == Sysno::open || 
+            syscall_info.syscall == Sysno::openat || 
+            syscall_info.syscall == Sysno::openat2 || 
+            syscall_info.syscall == Sysno::creat {
+                let fd = match syscall_info.result {
+                    RetCode::Ok(ret) => ret,
+                    RetCode::Address(_) => panic!("Return value of an open* syscall shouldn't be an address"),
+                    RetCode::Err(err) => err
+                };
+
+                if fd >= 0 {
+                    let path_arg: &SyscallArg = if syscall_info.syscall == Sysno::open || syscall_info.syscall == Sysno::creat {
+                            &syscall_info.args.0[0]
+                        } else if syscall_info.syscall == Sysno::openat || syscall_info.syscall == Sysno::openat2{
+                            &syscall_info.args.0[1]
+                        }
+                        else {
+                            panic!("Syscall {} not covered", syscall_info.syscall)
+                        };
+
+                    let pathname = match path_arg {
+                        SyscallArg::Int(_) => panic!("path_arg should be a string not an Int"),
+                        SyscallArg::Str(str) => str,
+                        SyscallArg::StrVec(_, _) => panic!("path_arg should be a string not a StrVec"),
+                        SyscallArg::Addr(_) => panic!("path_arg should be a string not an Addr"),
+                    };
+
+                    let fd_to_pathname = match self.fd_to_path_per_pid.get(&self.pid){
+                        None => panic!("Missing fd_to_path for pid {}", &self.pid),
+                        Some(fd_to_pathname) => fd_to_pathname
+                    };
+
+                    self.fd_to_path_per_pid = self.fd_to_path_per_pid.update(
+                        self.pid,
+                        fd_to_pathname.update(fd, pathname.to_string())
+                    )
+                }
         }
-         */
+
+        // if syscall is a close(), remove the fd from the hashmap
+        if syscall_info.syscall == Sysno::close {
+
+            let fd: i32 = match &syscall_info.args.0[0] {
+                SyscallArg::Int(i) => *i as i32,
+                SyscallArg::Str(_s) => panic!("First arg of close syscall should be a fd not a Str"),
+                SyscallArg::StrVec(_items, _) => panic!("First arg of close syscall should be a fd not a StrVec"),
+                SyscallArg::Addr(_) => panic!("First arg of close syscall should be a fd not an Addr"),
+            };
+
+            let fd_to_pathname = match self.fd_to_path_per_pid.get(&self.pid){
+                None => panic!("Missing fd_to_path for pid {}", &self.pid),
+                Some(fd_to_pathname) => fd_to_pathname
+            };
+
+            self.fd_to_path_per_pid = self.fd_to_path_per_pid.update(
+                self.pid,
+                fd_to_pathname.without(&fd)
+            )
+
+        }
+
+        // update self.syscall_infos
+        self.syscall_infos.push(syscall_info);
     }
 
     // Issue a PTRACE_SYSCALL request to the tracee, forwarding a signal if one is provided.
