@@ -205,6 +205,61 @@ mod tests {
         Ok(())
     }
 
+
+    fn tracer_simple_write() -> Result<(), Error> {
+        let command = [String::from("tests/simple-write.sh")];
+
+        let config= Args::from({Args { 
+            syscall_number: false, 
+            attach: None, 
+            no_abbrev: false, 
+            string_limit: None, 
+            file: None, 
+            summary_only: false, 
+            summary: false, 
+            successful_only: false, 
+            failed_only: false, 
+            env: Vec::new(), 
+            username: None, 
+            follow_forks: true, 
+            syscall_times: false, 
+            expr: Vec::new(), 
+            json: false, 
+            collapse_exec_retries: false,
+            command: Some(ArgCommand::Command(vec![])),
+        }});
+
+        let child_pid = {
+            match unsafe { fork() } {
+                Ok(ForkResult::Child) => return run_tracee(&command, &config.env, &None),
+                Ok(ForkResult::Parent { child }) => child,
+                Err(err) => bail!("fork() failed: {err}"),
+            }
+        };
+
+        let output: Box<dyn Write> = Box::new(std::io::stdout());
+
+        let mut tracer = Tracer::new(child_pid, config, output)?;
+        let _ = tracer.run_tracer() ;
+
+        let written_to_filepaths = tracer.get_written_files().unwrap();
+
+        assert!(
+            written_to_filepaths.clone().any(|filepath| filepath == "/tmp/yo.txt"),
+            "'/tmp/yo.txt' should be written to by a call to tests/simple-write.sh"
+        );      
+
+        println!("Files written to (write syscall)");
+        
+        for filepath in written_to_filepaths {
+            println!("{}", filepath);
+        }
+
+
+        Ok(())
+    }
+
+
 }
 
 
