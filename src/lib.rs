@@ -461,8 +461,8 @@ impl<W: Write> Tracer<W> {
         return Ok(attempted_opened_filepaths)
     }
 
+    // get read syscalls for which return value is >= 1 (read at least one byte from file)
     pub fn get_read_files(&self) -> Result<impl Iterator<Item = &String> + Clone>{
-        // get read syscalls for which return value is >= 1 (read at least one byte from file)
         let read_at_least_one_byte_syscalls = self.syscall_infos.iter()
             .filter(|&si| si.syscall == Sysno::read && match si.result {
                 RetCode::Address(_) => false,
@@ -489,6 +489,33 @@ impl<W: Write> Tracer<W> {
             });
 
         return Ok(read_filepaths)
+    }
+
+    // get write syscalls 
+    pub fn get_written_files(&self) -> Result<impl Iterator<Item = &String> + Clone>{
+
+        let write_syscalls = self.syscall_infos.iter()
+            .filter(|&si| si.syscall == Sysno::write);
+
+        // get the filepath corresponding to this fd 
+        let written_to_filepaths = write_syscalls
+            .map(|osi| {
+                let fd: i32 = match &osi.args.0[0] {
+                    SyscallArg::Int(i) => *i as i32,
+                    SyscallArg::Str(_s) => panic!("First arg of read syscall should be a fd not a Str"),
+                    SyscallArg::StrVec(_items, _) => panic!("First arg of read syscall should be a fd not a StrVec"),
+                    SyscallArg::Addr(_) => panic!("First arg of read syscall should be a fd not an Addr"),
+                };
+
+                let pathname = osi.fd_to_pathname.get(&fd);
+
+                match pathname {
+                    None => panic!("Did not find corresponding pathname for fd {}", fd),
+                    Some(pathname) => pathname
+                }
+            });
+
+        return Ok(written_to_filepaths)
     }
 
 

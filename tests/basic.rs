@@ -205,7 +205,8 @@ mod tests {
         Ok(())
     }
 
-
+    
+    #[test]
     fn tracer_simple_write() -> Result<(), Error> {
         let command = [String::from("tests/simple-write.sh")];
 
