@@ -641,8 +641,7 @@ impl<W: Write> Tracer<W> {
         Ok(())
     }
 
-    fn store_syscall_info(&mut self, syscall_info: SyscallInfo) -> () {
-        // update self.fd_to_path_per_pid
+    fn update_fd_to_path_per_pid(&mut self, syscall_info: &SyscallInfo){
         // if syscall is a open*, associate the path used as argument with the fd returned as result
         if syscall_info.syscall == Sysno::open || 
             syscall_info.syscall == Sysno::openat || 
@@ -704,8 +703,12 @@ impl<W: Write> Tracer<W> {
             )
 
         }
+    }
 
-        // update self.syscall_infos
+    fn store_syscall_info(&mut self, syscall_info: SyscallInfo) -> () {
+        
+        self.update_fd_to_path_per_pid(&syscall_info);
+        
         self.syscall_infos.push(syscall_info);
     }
 
