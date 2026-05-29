@@ -612,7 +612,7 @@ impl<W: Write> Tracer<W> {
                     duration: elapsed,
                     fd_to_pathname: fd_to_pathname.clone() // maybe this clone is a performance problem. Maybe not
                 };
-                self.write_syscall_info(info);
+                self.store_syscall_info(info);
             }
         }
 
@@ -637,11 +637,11 @@ impl<W: Write> Tracer<W> {
             fd_to_pathname: fd_to_pathname.clone() // maybe this clone is a performance problem. Maybe not
             // PPP add fd => pathname association
         };
-        self.write_syscall_info(info);
+        self.store_syscall_info(info);
         Ok(())
     }
 
-    fn write_syscall_info(&mut self, syscall_info: SyscallInfo) -> () {
+    fn store_syscall_info(&mut self, syscall_info: SyscallInfo) -> () {
         // update self.fd_to_path_per_pid
         // if syscall is a open*, associate the path used as argument with the fd returned as result
         if syscall_info.syscall == Sysno::open || 
