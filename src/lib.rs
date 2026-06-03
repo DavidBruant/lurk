@@ -85,7 +85,9 @@ use syscalls::{Sysno, SysnoMap, SysnoSet};
 use uzers::get_user_by_name;
 
 use crate::args::{Args, Filter};
-use crate::syscall_info::{FdToPathname, RetCode, SyscallArg, SyscallArgs, SyscallInfo};
+use crate::syscall_info::{FdToFdtype, FdType, RetCode, SyscallArg, SyscallArgs, SyscallInfo};
+
+
 
 pub struct Tracer<W: Write> {
     pid: Pid,
@@ -96,7 +98,7 @@ pub struct Tracer<W: Write> {
     syscalls_fail: SysnoMap<u64>,
 
     pub syscall_infos: Vec<SyscallInfo>,
-    fd_to_path_per_pid: ImmHashMap<Pid, FdToPathname>,
+    fd_to_path_per_pid: ImmHashMap<Pid, FdToFdtype>,
 
     output: W,
     // If enabled, count and collapse repeated failing execve attempts per pid
@@ -463,11 +465,35 @@ impl<W: Write> Tracer<W> {
 
     // get read syscalls for which return value is >= 1 (read at least one byte from file)
     pub fn get_read_files(&self) -> Result<impl Iterator<Item = &String> + Clone>{
+        
         let read_at_least_one_byte_syscalls = self.syscall_infos.iter()
+            // select only read syscalls
             .filter(|&si| si.syscall == Sysno::read && match si.result {
                 RetCode::Address(_) => false,
                 RetCode::Err(_) => false,
                 RetCode::Ok(read) => read >= 1 
+            })
+            // keep syscalls reading an actual fs file 
+            .filter(|&si| {
+                // only read syscalls, so si.args.0[0] must be a fd (number)
+                let fd: i32 = match &si.args.0[0] {
+                    SyscallArg::Int(i) => *i as i32,
+                    SyscallArg::Str(_s) => panic!("First arg of read syscall should be a fd not a Str"),
+                    SyscallArg::StrVec(_items, _) => panic!("First arg of read syscall should be a fd not a StrVec"),
+                    SyscallArg::Addr(_) => panic!("First arg of read syscall should be a fd not an Addr"),
+                };
+
+                let fdtype = si.fd_to_fdtype.get(&fd);
+
+                match fdtype {
+                    None => false,
+                    Some(fdtype) => match fdtype {
+                        FdType::Stdin => false,
+                        FdType::Stdout => false,
+                        FdType::Stderr => false,
+                        FdType::File(_) => true,
+                    }
+                }
             });
 
         // get the filepath corresponding to this fd 
@@ -480,11 +506,16 @@ impl<W: Write> Tracer<W> {
                     SyscallArg::Addr(_) => panic!("First arg of read syscall should be a fd not an Addr"),
                 };
 
-                let pathname = osi.fd_to_pathname.get(&fd);
+                let fdtype = osi.fd_to_fdtype.get(&fd);
 
-                match pathname {
+                match fdtype {
                     None => panic!("Did not find corresponding pathname for fd {}", fd),
-                    Some(pathname) => pathname
+                    Some(fdtype) => match fdtype {
+                        FdType::Stdin => panic!("fdtype should be a filepath, not stdin"),
+                        FdType::Stdout => panic!("fdtype should be a filepath, not stdout"),
+                        FdType::Stderr => panic!("fdtype should be a filepath, not stderr"),
+                        FdType::File(str) => str,
+                    }
                 }
             });
 
@@ -495,7 +526,29 @@ impl<W: Write> Tracer<W> {
     pub fn get_written_files(&self) -> Result<impl Iterator<Item = &String> + Clone>{
 
         let write_syscalls = self.syscall_infos.iter()
-            .filter(|&si| si.syscall == Sysno::write);
+            .filter(|&si| si.syscall == Sysno::write)
+            // keep syscalls writing to an actual fs file 
+            .filter(|&si| {
+                // only read syscalls, so si.args.0[0] must be a fd (number)
+                let fd: i32 = match &si.args.0[0] {
+                    SyscallArg::Int(i) => *i as i32,
+                    SyscallArg::Str(_s) => panic!("First arg of read syscall should be a fd not a Str"),
+                    SyscallArg::StrVec(_items, _) => panic!("First arg of read syscall should be a fd not a StrVec"),
+                    SyscallArg::Addr(_) => panic!("First arg of read syscall should be a fd not an Addr"),
+                };
+
+                let fdtype = si.fd_to_fdtype.get(&fd);
+
+                match fdtype {
+                    None => false,
+                    Some(fdtype) => match fdtype {
+                        FdType::Stdin => false,
+                        FdType::Stdout => false,
+                        FdType::Stderr => false,
+                        FdType::File(_) => true,
+                    }
+                }
+            });
 
         // get the filepath corresponding to this fd 
         let written_to_filepaths = write_syscalls
@@ -507,11 +560,16 @@ impl<W: Write> Tracer<W> {
                     SyscallArg::Addr(_) => panic!("First arg of read syscall should be a fd not an Addr"),
                 };
 
-                let pathname = osi.fd_to_pathname.get(&fd);
+                let fdtype = osi.fd_to_fdtype.get(&fd);
 
-                match pathname {
+                match fdtype {
                     None => panic!("Did not find corresponding pathname for fd {}", fd),
-                    Some(pathname) => pathname
+                    Some(fdtype) => match fdtype {
+                        FdType::Stdin => panic!("fdtype should be a filepath, not stdin"),
+                        FdType::Stdout => panic!("fdtype should be a filepath, not stdout"),
+                        FdType::Stderr => panic!("fdtype should be a filepath, not stderr"),
+                        FdType::File(str) => str,
+                    }
                 }
             });
 
@@ -610,7 +668,7 @@ impl<W: Write> Tracer<W> {
                     args,
                     result: ret_code,
                     duration: elapsed,
-                    fd_to_pathname: fd_to_pathname.clone() // maybe this clone is a performance problem. Maybe not
+                    fd_to_fdtype: fd_to_pathname.clone() // maybe this clone is a performance problem. Maybe not
                 };
                 self.store_syscall_info(info);
             }
@@ -634,7 +692,7 @@ impl<W: Write> Tracer<W> {
             args,
             result: RetCode::Ok(0),
             duration: Duration::default(),
-            fd_to_pathname: fd_to_pathname.clone() // maybe this clone is a performance problem. Maybe not
+            fd_to_fdtype: fd_to_pathname.clone() // maybe this clone is a performance problem. Maybe not
             // PPP add fd => pathname association
         };
         self.store_syscall_info(info);
@@ -677,7 +735,7 @@ impl<W: Write> Tracer<W> {
 
                     self.fd_to_path_per_pid = self.fd_to_path_per_pid.update(
                         self.pid,
-                        fd_to_pathname.update(fd, pathname.to_string())
+                        fd_to_pathname.update(fd, syscall_info::FdType::File(pathname.to_string()))
                     )
                 }
         }

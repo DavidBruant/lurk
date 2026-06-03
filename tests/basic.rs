@@ -245,16 +245,18 @@ mod tests {
 
         let written_to_filepaths = tracer.get_written_files().unwrap();
 
+        println!("Files written to (write syscall)");
+        
+        for filepath in written_to_filepaths.clone() {
+            println!("{}", filepath);
+        }
+
         assert!(
             written_to_filepaths.clone().any(|filepath| filepath == "/tmp/yo.txt"),
             "'/tmp/yo.txt' should be written to by a call to tests/simple-write.sh"
         );      
 
-        println!("Files written to (write syscall)");
-        
-        for filepath in written_to_filepaths {
-            println!("{}", filepath);
-        }
+
 
 
         Ok(())

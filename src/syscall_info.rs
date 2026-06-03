@@ -18,7 +18,18 @@ use std::os::fd::RawFd;
 use std::time::Duration;
 use syscalls::Sysno;
 
-pub type FdToPathname = HashMap<RawFd, String>;
+#[derive(Debug)]
+#[derive(Clone)]
+pub enum FdType {
+    Stdin,
+    Stdout,
+    Stderr,
+    File(String), // filepath
+    // Incomplete; other will come later
+}
+
+
+pub type FdToFdtype = HashMap<RawFd, FdType>;
 
 #[derive(Debug)]
 pub struct SyscallInfo {
@@ -28,7 +39,7 @@ pub struct SyscallInfo {
     pub args: SyscallArgs,
     pub result: RetCode,
     pub duration: Duration,
-    pub fd_to_pathname: FdToPathname
+    pub fd_to_fdtype: FdToFdtype
 }
 
 impl SyscallInfo {
@@ -38,7 +49,7 @@ impl SyscallInfo {
         ret_code: RetCode,
         registers: user_regs_struct,
         duration: Duration,
-        fd_to_pathname: FdToPathname
+        fd_to_fdtype: FdToFdtype
     ) -> Self {
         Self {
             typ: "SYSCALL",
@@ -47,7 +58,7 @@ impl SyscallInfo {
             args: parse_args(pid, syscall, registers),
             result: ret_code,
             duration,
-            fd_to_pathname
+            fd_to_fdtype
         }
     }
 
