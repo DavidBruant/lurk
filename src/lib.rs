@@ -98,7 +98,7 @@ pub struct Tracer<W: Write> {
     syscalls_fail: SysnoMap<u64>,
 
     pub syscall_infos: Vec<SyscallInfo>,
-    fd_to_path_per_pid: ImmHashMap<Pid, FdToFdtype>,
+    fd_to_fdtype_by_pid: ImmHashMap<Pid, FdToFdtype>,
 
     output: W,
     // If enabled, count and collapse repeated failing execve attempts per pid
@@ -107,8 +107,8 @@ pub struct Tracer<W: Write> {
 
 impl<W: Write> Tracer<W> {
     pub fn new(pid: Pid, args: Args, output: W) -> Result<Self> {
-        let mut fd_to_path_per_pid = ImmHashMap::new();
-        fd_to_path_per_pid = fd_to_path_per_pid.update(pid, ImmHashMap::new());
+        let mut fd_to_fdtype_by_pid = ImmHashMap::new();
+        fd_to_fdtype_by_pid = fd_to_fdtype_by_pid.update(pid, ImmHashMap::new());
 
         Ok(Self {
             pid,
@@ -121,7 +121,7 @@ impl<W: Write> Tracer<W> {
             syscalls_fail: SysnoMap::from_iter(SysnoSet::all().iter().map(|v| (v, 0))),
 
             syscall_infos: Vec::new(),
-            fd_to_path_per_pid: fd_to_path_per_pid,
+            fd_to_fdtype_by_pid,
 
             output,
             exec_retry_counts: HashMap::new(),
@@ -653,7 +653,7 @@ impl<W: Write> Tracer<W> {
             }
 
             if !self.args.summary_only {
-                let fd_to_pathname = match self.fd_to_path_per_pid.get(&pid) {
+                let fd_to_pathname = match self.fd_to_fdtype_by_pid.get(&pid) {
                     None => panic!("No fd_to_path found for pid {}", pid),
                     Some(map) => map
                 };
@@ -678,7 +678,7 @@ impl<W: Write> Tracer<W> {
     }
 
     fn log_exec_event(&mut self, pid: Pid, args: SyscallArgs) -> Result<()> {
-        let fd_to_pathname = match self.fd_to_path_per_pid.get(&pid) {
+        let fd_to_pathname = match self.fd_to_fdtype_by_pid.get(&pid) {
             None => panic!("No fd_to_path found for pid {}", pid),
             Some(map) => map
         };
@@ -699,7 +699,7 @@ impl<W: Write> Tracer<W> {
         Ok(())
     }
 
-    fn update_fd_to_path_per_pid(&mut self, syscall_info: &SyscallInfo){
+    fn update_fd_to_fdtype_by_pid(&mut self, syscall_info: &SyscallInfo){
         // if syscall is a open*, associate the path used as argument with the fd returned as result
         if syscall_info.syscall == Sysno::open || 
             syscall_info.syscall == Sysno::openat || 
@@ -728,12 +728,12 @@ impl<W: Write> Tracer<W> {
                         SyscallArg::Addr(_) => panic!("path_arg should be a string not an Addr"),
                     };
 
-                    let fd_to_pathname = match self.fd_to_path_per_pid.get(&self.pid){
+                    let fd_to_pathname = match self.fd_to_fdtype_by_pid.get(&self.pid){
                         None => panic!("Missing fd_to_path for pid {}", &self.pid),
                         Some(fd_to_pathname) => fd_to_pathname
                     };
 
-                    self.fd_to_path_per_pid = self.fd_to_path_per_pid.update(
+                    self.fd_to_fdtype_by_pid = self.fd_to_fdtype_by_pid.update(
                         self.pid,
                         fd_to_pathname.update(fd, syscall_info::FdType::File(pathname.to_string()))
                     )
@@ -750,12 +750,12 @@ impl<W: Write> Tracer<W> {
                 SyscallArg::Addr(_) => panic!("First arg of close syscall should be a fd not an Addr"),
             };
 
-            let fd_to_pathname = match self.fd_to_path_per_pid.get(&self.pid){
+            let fd_to_pathname = match self.fd_to_fdtype_by_pid.get(&self.pid){
                 None => panic!("Missing fd_to_path for pid {}", &self.pid),
                 Some(fd_to_pathname) => fd_to_pathname
             };
 
-            self.fd_to_path_per_pid = self.fd_to_path_per_pid.update(
+            self.fd_to_fdtype_by_pid = self.fd_to_fdtype_by_pid.update(
                 self.pid,
                 fd_to_pathname.without(&fd)
             )
@@ -765,7 +765,7 @@ impl<W: Write> Tracer<W> {
 
     fn store_syscall_info(&mut self, syscall_info: SyscallInfo) -> () {
         
-        self.update_fd_to_path_per_pid(&syscall_info);
+        self.update_fd_to_fdtype_by_pid(&syscall_info);
         
         self.syscall_infos.push(syscall_info);
     }
